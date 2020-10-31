@@ -16,8 +16,8 @@ function calculate(){
             result=$(($num1-$num2))
         ;;
 
-        "*")
-            result=$(($num1*$num2))
+        "x")
+            result=$((num1*num2))
         ;;
     esac
 
