@@ -8,15 +8,22 @@
 #include <pthread.h>
 #include <cstdlib>  
 
-#define PORT 8080 
+// #define PORT 8080 
 #define MESSAGE_SIZE 1024
 
 using namespace std;
    
 void *read_socket(void *client_sock);
 
-int main(int argc, char const *argv[]) 
-{ 
+int main(int argc, char *argv[]) {
+
+    if(argc < 3){
+        puts("[ERROR]Not enough args");
+        exit(EXIT_FAILURE);
+    }
+    int port = atoi(argv[1]);
+    string client_name = argv[2];
+
     int client_socket = 0, valread; 
     struct sockaddr_in serv_addr; 
 
@@ -29,7 +36,7 @@ int main(int argc, char const *argv[])
     } 
    
     serv_addr.sin_family = AF_INET; 
-    serv_addr.sin_port = htons(PORT); 
+    serv_addr.sin_port = htons(port); 
        
     // Convert IPv4 and IPv6 addresses from text to binary form 
     if(inet_pton(AF_INET, "127.0.0.1", &serv_addr.sin_addr)<=0)  
@@ -51,20 +58,26 @@ int main(int argc, char const *argv[])
          exit(-1);
     }
 
-    string join_string = "/name mamad";
+    string join_string = "/name " + client_name;
     send(client_socket , join_string.c_str() , strlen(join_string.c_str()) , 0 ); 
 
     string user_command = "";
 
-    do{
-        cin >> user_command;
-        send(client_socket, user_command.c_str(), strlen(user_command.c_str()), 0);
-    }while(user_command.find("/quit") == string::npos);
-    
-    pthread_exit(NULL); 
-    printf("[CLIENT] Quit called\n"); 
-    // valread = read( client_socket , buffer, 1024); 
-    // printf("%s\n",buffer ); 
+    while(true){
+        // cout << ">";
+        getline(cin, user_command);
+        string command = user_command.substr(0, user_command.find(" "));
+        if(command != "/join" && command != "/send" && command != "/leave" && command != "/quit"){
+            cout << "[ERROR] not a valid command: '" << command << "'\n";
+        }else{
+            send(client_socket, user_command.c_str(), strlen(user_command.c_str()), 0);
+        }
+        if(command == "/quit")
+            break; 
+    };
+
+    pthread_cancel(tid);
+    puts("[CLIENT] Quit called\n"); 
 
     return 0; 
 } 
@@ -76,12 +89,10 @@ void *read_socket(void *client_sock){
         
         if(byte_count > 0){
             cout << "read:" << byte_count <<endl;
-            cout << buffer << endl;
- 
+            string input(buffer);
+            bzero(buffer, MESSAGE_SIZE);
+            cout << input << endl;
         }
        
     }
-
-    
-
 }

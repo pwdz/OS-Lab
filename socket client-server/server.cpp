@@ -9,18 +9,41 @@
 #include <list> 
 #include <thread>
 #include <iostream>
+#include <vector>
+#include <algorithm>
 
 using namespace std;
 
 // #define PORT 8080
 #define MESSAGE_SIZE 1024
 
-void checkkErr(int statusCode, string msg);
 
-void *handle_client(void *client_sock);
+struct client
+{
+    string name;
+    pthread_t tid;
+    int socket;
+};
+struct group
+{
+    string group_id;
+    vector<client*> members;
+};
+
+group groups[10];
+int groups_count = 0;
    
+void checkkErr(int statusCode, string msg);
+void *handle_client(void *client_sock);
+void handle_event(client *client, string command, string input);
+void send_msg(client *client, string msg);
+void set_name(client *client, string input);
+void join_group(client *client,string input);
+int find_group(string group_id);
+void send_to_gp(client *client, string msg, string group_id);
+
 int main(int argc, char *argv[]) {
-    cout << "asd";
+
     if(argc < 2){
         puts("[ERROR]Not enough args");
         exit(EXIT_FAILURE);
@@ -43,28 +66,17 @@ int main(int argc, char *argv[]) {
     checkkErr(listen(server_fd, 3), "Listen error");
     printf("Listen on %s:%d\n", inet_ntoa(address.sin_addr), ntohs(address.sin_port));
 
-    cout << ":|";
-    // while (true){
-
-        cout << "asdadadadadadadadadadad11111111";
+    while (true){
         int new_socket = accept(server_fd, (struct sockaddr *)&address, (socklen_t*)&addrlen);
         checkkErr(new_socket, "accept"); 
 
-        cout << "asdadadadadadadadadadad";
         pthread_t tid;
         int rc = pthread_create(&tid, NULL, handle_client, (void *)new_socket); 
         if (rc) {
             printf("Error:unable to create thread, %d\n", rc);
             exit(-1);
         }
-    // }
-    
-  
-   
-    // printf("%s\n",buffer ); 
-    // send(new_socket , "salammmmmm" , strlen("salammmmmm") , 0 ); 
-
-    // writes to client socket
+    }
     return 0;
 }    
 void checkkErr(int statusCode, string msg){
@@ -74,27 +86,103 @@ void checkkErr(int statusCode, string msg){
     }
 }
 void *handle_client(void *client_sock){
-
-    cout << "s:||||||";
     int client_socket = (int)(long)client_sock;
 
-    cout << "s:||||||";
     char buffer[MESSAGE_SIZE];
-    int byte_count;
-        string user_command = "";
+    bzero(buffer, MESSAGE_SIZE);
 
-    do{
+    int byte_count;
+    client client;
+    client.name = "";
+    client.socket = client_socket;
+    client.tid = pthread_self();
+
+    while(true){
         byte_count = read( client_socket , buffer, MESSAGE_SIZE); 
         if(byte_count > 0){
             string input(buffer);
-            cout << input;
+            bzero(buffer, MESSAGE_SIZE);
 
-            send(client_socket, input.c_str(), strlen(input.c_str()), 0);
+            string command = input.substr(0, input.find(" "));
+            input = input.substr(input.find(" ") + 1, input.size());
+
+            handle_event(&client, command, input);
         }
 
         // send(client_socket, user_command.c_str(), strlen(user_command.c_str()), 0);
-    }while(user_command.find("/quit") == string::npos);
- 
-  
+    };
+}
+void handle_event(client *client, string command, string input){
 
+    if(command == "/name"){
+        set_name(client , input);
+    }else if(command == "/join"){
+        join_group(client, input);
+    }else if(command == "/send"){
+        string group_id = input.substr(0, input.find(" "));
+        input = input.substr(input.find(" ") + 1, input.size());
+        send_to_gp(client, input, group_id);
+    }else if(command == "/leave"){
+        
+    }else if(command == "/quit"){
+        pthread_cancel(client->tid);
+    }
+
+}
+void set_name(client *client, string input){
+    cout << "[SERVER] '" << input << "' Joined the server. Socket:" << client->socket << "\n";
+    client->name = input;
+    send_msg(client, "[FROM SERVER] >>>>>>> Welcome "+ client->name + " <<<<<<<");
+}
+void join_group(client *client,string input){
+    string group_id = input.substr(0, input.find(" "));
+    
+    int i;
+    if((i = find_group(group_id)) != -1){
+        if(!count(groups[i].members.begin(), groups[i].members.end(), client)){ //Element Not Found
+            cout << "[SERVER] Adding '" << client->name << "' to group '" << group_id << "'\n"; 
+            send_msg(client, "[FROM SERVER] You are added to " + group_id);
+            groups[i].members.push_back(client);
+        }else{
+            cout << "[SERVER] " << client->name << " is already in group" << "\n";
+            send_msg(client, "[FROM SERVER] You are already a member of group " + group_id);
+        }
+        return;
+    }
+
+    //If reaches here, means there is not such a group
+    group group;
+    group.group_id = group_id;
+    group.members.push_back(client);
+    groups[groups_count] = group;
+    groups_count++;
+
+    send_msg(client, "[FROM SERVER] Group " + group_id + " created.");
+    cout << "[SERVER] Group '" << group_id << "' created by '" << client->name <<"'\n";
+}
+void send_msg(client *client, string msg){
+    send(client->socket, msg.c_str(), strlen(msg.c_str()), 0);
+}
+void send_to_gp(client *client, string msg, string group_id){
+    int index;
+    if((index = find_group(group_id)) != -1){
+        cout << "[SERVER] Sending message from " + client->name +" to group "+ group_id + "\n";
+        for(int i=0; i<groups[index].members.size(); i++){
+            if(groups[index].members[i]->name != client->name){
+                send_msg(groups[index].members[i], "[FROM SERVER]["+group_id+"]["+client->name+"]:"+msg);
+                cout << "[SERVER][" << group_id << "][" << client->name << "]:" << msg << "\n";
+            }
+        }
+    }else{
+        send_msg(client, "[FROM SERVER] Group "+group_id+" doesn't exist!");
+        cout << "[SERVER][ERROR] Group " + group_id + " doesn't exist |Message from:" + client->name + "|\n";
+    }
+}
+int find_group(string group_id){
+    for(int i=0; i<groups_count; i++){
+        if(groups[i].group_id == group_id){
+            return i;
+        }
+    }
+    return -1;
 }
