@@ -11,12 +11,12 @@
 #include <iostream>
 #include <vector>
 #include <algorithm>
+#include <stdbool.h>
 
 using namespace std;
 
 // #define PORT 8080
 #define MESSAGE_SIZE 1024
-
 
 struct client
 {
@@ -40,7 +40,8 @@ void send_msg(client *client, string msg);
 void set_name(client *client, string input);
 void join_group(client *client,string input);
 int find_group(string group_id);
-void send_to_gp(client *client, string msg, string group_id);
+void send_to_gp(client *client, string msg, string group_id, bool is_leave_msg);
+void leave_gp(client *client, string group_id);
 
 int main(int argc, char *argv[]) {
 
@@ -50,6 +51,8 @@ int main(int argc, char *argv[]) {
     }
     int port = atoi(argv[1]);
     int server_fd;
+
+    cout << "[SERVER] starting server ..." << "\n";
 
     struct sockaddr_in address;
  
@@ -64,8 +67,8 @@ int main(int argc, char *argv[]) {
     checkkErr(bind(server_fd, (struct sockaddr *)&address, sizeof(address)), "Binding failed");
 
     checkkErr(listen(server_fd, 3), "Listen error");
-    printf("Listen on %s:%d\n", inet_ntoa(address.sin_addr), ntohs(address.sin_port));
 
+    printf("[SERVER] Listen on %s:%d\n", inet_ntoa(address.sin_addr), ntohs(address.sin_port));
     while (true){
         int new_socket = accept(server_fd, (struct sockaddr *)&address, (socklen_t*)&addrlen);
         checkkErr(new_socket, "accept"); 
@@ -73,7 +76,7 @@ int main(int argc, char *argv[]) {
         pthread_t tid;
         int rc = pthread_create(&tid, NULL, handle_client, (void *)new_socket); 
         if (rc) {
-            printf("Error:unable to create thread, %d\n", rc);
+            printf("[SERVER] Error:unable to create thread, %d\n", rc);
             exit(-1);
         }
     }
@@ -108,8 +111,6 @@ void *handle_client(void *client_sock){
 
             handle_event(&client, command, input);
         }
-
-        // send(client_socket, user_command.c_str(), strlen(user_command.c_str()), 0);
     };
 }
 void handle_event(client *client, string command, string input){
@@ -120,11 +121,14 @@ void handle_event(client *client, string command, string input){
         join_group(client, input);
     }else if(command == "/send"){
         string group_id = input.substr(0, input.find(" "));
-        input = input.substr(input.find(" ") + 1, input.size());
-        send_to_gp(client, input, group_id);
+        input = input.substr(input.find(" ") , input.size());
+        send_to_gp(client, input, group_id, false);
     }else if(command == "/leave"){
-        
+        input = input.substr(input.find(" ") + 1, input.size());
+        leave_gp(client, input);
     }else if(command == "/quit"){
+        send_msg(client, "[FROM SERVER] Disconnected");
+        cout << "[SERVER] User " << client->name << " disconnected form server";
         pthread_cancel(client->tid);
     }
 
@@ -163,20 +167,43 @@ void join_group(client *client,string input){
 void send_msg(client *client, string msg){
     send(client->socket, msg.c_str(), strlen(msg.c_str()), 0);
 }
-void send_to_gp(client *client, string msg, string group_id){
+void send_to_gp(client *client, string msg, string group_id, bool is_leave_msg){
     int index;
+    string msg_generator = client->name;
     if((index = find_group(group_id)) != -1){
-        cout << "[SERVER] Sending message from " + client->name +" to group "+ group_id + "\n";
+        if(is_leave_msg)
+            msg_generator = "Group";
+        cout << "[SERVER] Sending message from " + msg_generator +" to group "+ group_id + "\n";
         for(int i=0; i<groups[index].members.size(); i++){
             if(groups[index].members[i]->name != client->name){
-                send_msg(groups[index].members[i], "[FROM SERVER]["+group_id+"]["+client->name+"]:"+msg);
-                cout << "[SERVER][" << group_id << "][" << client->name << "]:" << msg << "\n";
+                send_msg(groups[index].members[i], "[FROM SERVER]["+group_id+"]["+msg_generator+"]:"+msg);
+                cout << "[SERVER][" << group_id << "][" << msg_generator << "]:" << msg << "\n";
             }
         }
     }else{
-        send_msg(client, "[FROM SERVER] Group "+group_id+" doesn't exist!");
+        send_msg(client, "[FROM SERVER][ERROR] Group "+group_id+" doesn't exist!");
         cout << "[SERVER][ERROR] Group " + group_id + " doesn't exist |Message from:" + client->name + "|\n";
     }
+}
+void leave_gp(client *client, string group_id){
+    int index;
+    if((index = find_group(group_id)) != -1){
+
+        if(!count(groups[index].members.begin(), groups[index].members.end(), client)){ //Element Not Found
+            send_msg(client, "[FROM SERVER][ERROR] You are not a member of group " + group_id);
+            cout << "[SERVER][ERROR] User " << client->name << " is not a member of group " << group_id + "|due to leave request|\n";
+        }else{
+            send_to_gp(client, "user "+client->name+" left the group.", group_id, true);
+            groups[index].members.erase(remove(groups[index].members.begin(), groups[index].members.end(), client), groups[index].members.end());
+            send_msg(client, "[FROM SERVER] You left the group "+ group_id);
+        }
+    }else{
+        send_msg(client, "[FROM SERVER][ERROR] Group "+group_id+" doesn't exist!");
+        cout << "[SERVER][ERROR] Group " << group_id << " doesn't exist |Leave request from:" << client->name << "|\n";
+
+    }
+  
+
 }
 int find_group(string group_id){
     for(int i=0; i<groups_count; i++){

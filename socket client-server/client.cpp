@@ -64,7 +64,6 @@ int main(int argc, char *argv[]) {
     string user_command = "";
 
     while(true){
-        // cout << ">";
         getline(cin, user_command);
         string command = user_command.substr(0, user_command.find(" "));
         if(command != "/join" && command != "/send" && command != "/leave" && command != "/quit"){
@@ -84,11 +83,11 @@ int main(int argc, char *argv[]) {
 void *read_socket(void *client_sock){
     int client_socket = (int)(long)client_sock;
     char buffer[MESSAGE_SIZE];
+    bzero(buffer, MESSAGE_SIZE);
     while(1){
         int byte_count = read(client_socket, buffer, MESSAGE_SIZE);
         
         if(byte_count > 0){
-            cout << "read:" << byte_count <<endl;
             string input(buffer);
             bzero(buffer, MESSAGE_SIZE);
             cout << input << endl;
